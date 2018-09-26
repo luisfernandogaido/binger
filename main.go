@@ -1,20 +1,44 @@
-//https://dev.cognitive.microsoft.com/docs/services/56b43f0ccf5ff8098cef3808/operations/571fab09dbe2d933e891028f
 package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
+type Contador struct {
+	sync.RWMutex
+	n int
+}
+
+func (c *Contador) Incrementa() {
+	c.Lock()
+	c.n++
+	c.Unlock()
+}
+
+func (c *Contador) Get() int {
+	c.RLock()
+	n := c.n
+	c.RUnlock()
+	return n
+}
+
 var (
-	replacer *strings.Replacer
+	replacer  *strings.Replacer
+	sucessos  Contador
+	fracassos Contador
 )
 
 func init() {
@@ -28,6 +52,8 @@ func init() {
 		">", "",
 		"|", "",
 	)
+	http.DefaultClient.Timeout = time.Second * 20
+	rand.Seed(time.Now().UnixNano())
 }
 
 type Result struct {
@@ -43,13 +69,27 @@ type Value struct {
 }
 
 func main() {
-	if err := downloadAll("chess", "./files"); err != nil {
+	var (
+		q, d, k string
+	)
+	flag.StringVar(&q, "q", "gatos", "termos de pesquisa")
+	flag.StringVar(&d, "d", "./files", "diretório em que as imagens serão armazenadas.")
+	flag.StringVar(&k, "k", "080dc190775c4f488a857b2110a4e120", "Bing Search v7 key ")
+	flag.Parse()
+	if d == "./files" {
+		os.Mkdir(d, 0644)
+	}
+	t0 := time.Now()
+	if err := downloadAll(q, d, k); err != nil {
 		log.Fatal(err)
 	}
+	fmt.Printf("Executado em %v segundos.\n", time.Since(t0))
 }
 
-func downloadAll(q, d string) error {
-	values, err := search(q)
+func downloadAll(q, d, k string) error {
+	fmt.Println("Buscando endereços...")
+	values, err := search(q, k)
+	fmt.Printf("%v endereços retornados. Iniciando download...\n", len(values))
 	if err != nil {
 		return err
 	}
@@ -60,7 +100,15 @@ func downloadAll(q, d string) error {
 		go func(v Value) {
 			defer func() { <-sem }()
 			err := download(v.ContentUrl, v.Name, v.EncodingFormat, d)
-			fmt.Println(v.Name, err)
+			if err == nil {
+				sucessos.Incrementa()
+				s := sucessos.Get()
+				if s%50 == 0 {
+					fmt.Println(s)
+				}
+			} else {
+				fracassos.Incrementa()
+			}
 		}(values[i])
 	}
 	for i := 0; i < c; i++ {
@@ -69,7 +117,7 @@ func downloadAll(q, d string) error {
 	return nil
 }
 
-func search(q string) ([]Value, error) {
+func search(q, k string) ([]Value, error) {
 	values := make([]Value, 0)
 	totalMatches := 10000
 	offset := 0
@@ -77,6 +125,7 @@ func search(q string) ([]Value, error) {
 		params := url.Values{
 			"offset": []string{strconv.Itoa(offset)},
 			"q":      []string{q},
+			"count":  []string{"150"},
 		}
 		req, err := http.NewRequest(
 			"GET",
@@ -86,7 +135,7 @@ func search(q string) ([]Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Add("Ocp-Apim-Subscription-Key", "080dc190775c4f488a857b2110a4e120")
+		req.Header.Add("Ocp-Apim-Subscription-Key", k)
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return nil, err
@@ -104,7 +153,6 @@ func search(q string) ([]Value, error) {
 		totalMatches = result.TotalEstimatedMatches
 		offset = result.NextOffset
 		values = append(values, result.Value...)
-		fmt.Println(offset, totalMatches)
 	}
 	return values, nil
 }
@@ -119,5 +167,7 @@ func download(end, nam, ext, dir string) error {
 		return err
 	}
 	defer res.Body.Close()
-	return ioutil.WriteFile(filepath.Join(dir, replacer.Replace(nam)+"."+ext), bytes, 0644)
+	b := make([]byte, 2)
+	rand.Read(b)
+	return ioutil.WriteFile(filepath.Join(dir, replacer.Replace(nam)+fmt.Sprintf(" %x", b)+"."+ext), bytes, 0644)
 }
