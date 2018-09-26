@@ -1,5 +1,5 @@
 # binger
-Download de imagens com base em termos de busca fazendo uso de Image Search API v7, da Microsoft Azure
+Download de imagens com base em termos de busca fazendo uso de Image Search API v7, da Microsoft Azure.
 
 ### Vídeo de demonstração de uso
 
