@@ -1,6 +1,12 @@
 # binger
 Download de imagens com base em termos de busca fazendo uso de Image Search API v7, da Microsoft Azure
 
+### Vídeo de demonstração de uso
+
+https://youtu.be/-XcxBtlKk20
+
+### Como usar
+
 ```
 ~# binger -q "<termos_de_busca>"
 ```
